@@ -19,8 +19,8 @@ iframe {
 
 .container {
     text-align: center;
-    width: 80%;
-    /* height: 90%; */
+    max-width: 1200px;
+    width: 100%;
     margin: 0 auto;
     background-color: white;
     /* box-shadow:0 1px 1px rgba(0,0,0,0.15),0 2px 2px rgba(0,0,0,0.15),0 4px 4px rgba(0,0,0,0.15),0 8px 8px rgba(0,0,0,0.15); */
@@ -34,4 +34,35 @@ iframe {
 #background {
     background-color: grey;
     /* margin: 0 0; */
+}
+
+.tab-buttons {
+    max-width: 200px;
+    margin-inline: auto;
+    display: flex;
+    cursor: pointer;
+    background-color: #333;
+    color: white;
+}
+
+.tab-buttons div {
+    flex: 1;
+    padding: 10px;
+    text-align: center;
+    background: #ddd;
+    transition: background-color 0.3s;
+}
+
+.tab-buttons .active {
+    background-color: #555;
+    color: white;
+}
+
+.tab-content {
+    display: none;
+    padding: 20px;
+}
+
+.tab-content.active {
+    display: block;
 }
