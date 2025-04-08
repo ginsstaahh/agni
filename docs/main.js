@@ -23,60 +23,101 @@ function tabsClick(tabs, contents) {
     });
 }
 
-// 1. Initialize the map
-const map = L.map('map').setView([56.1304, -106.3468], 4);
-// Coordinates are roughly Canada’s center, with zoom level 4
+// Map initialization
+var map = L.map('map').setView([0, 0], 2);
+var fireLayer = L.layerGroup().addTo(map);
 
-// 2. Add a base tile layer
-L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    // Optionally add attribution info:
-    attribution: '© OpenStreetMap contributors'
-}).addTo(map);
+// FIRMS API URL (CSV)
+const FIRMS_API_URL = 'https://firms.modaps.eosdis.nasa.gov/api/area/csv/1746807051add9a45676c1b1a45d7301/VIIRS_SNPP_NRT/-141,41,-52,83/1/';
 
-// 3. Fetch wildfire data
-fetch('YOUR_REAL_DATA_SOURCE.geojson')
-    .then(response => {
-        if (!response.ok) {
-            throw new Error('Network response was not OK');
-        }
-        return response.json();
-    })
-    .then(data => {
-        // 4. Create a GeoJSON layer and add it to the map
-        //    This assumes your data is in GeoJSON format.
-        L.geoJSON(data, {
-            // 5. Customize how each feature (wildfire) is shown
-            pointToLayer: (feature, latlng) => {
-                // For wildfires, a red circle marker might be suitable
-                return L.circleMarker(latlng, {
-                    radius: 6,
-                    fillOpacity: 0.7,
-                    stroke: true,
-                    weight: 1
-                });
+function csvToGeoJSON(csvData) {
+    // Use PapaParse to convert CSV to JSON
+    const parsedData = Papa.parse(csvData, { header: true, dynamicTyping: true });
+    if (parsedData.errors.length > 0) {
+        console.error("Error parsing CSV:", parsedData.errors);
+        return { type: "FeatureCollection", features: [] }; // Return empty GeoJSON
+    }
+
+    const geojsonData = {
+        type: "FeatureCollection",
+        features: parsedData.data.map(row => ({
+            type: "Feature",
+            geometry: {
+                type: "Point",
+                coordinates: [row.longitude, row.latitude]
             },
-            style: feature => {
-                // You can set color based on severity, confidence, etc.
-                return {
-                    color: 'red',  // Outline color
-                    fillColor: 'red'
-                };
-            },
-            onEachFeature: (feature, layer) => {
-                // 6. Optionally bind popups with more info about the wildfire
-                // This depends on how your data is structured
-                const { properties } = feature;
-                const popupContent = `
-          <strong>Wildfire ID:</strong> ${properties.fire_id || 'N/A'}<br/>
-          <strong>Date Detected:</strong> ${properties.date || 'N/A'}<br/>
-          <strong>Confidence:</strong> ${properties.confidence || 'N/A'}<br/>
-          <strong>Latitude:</strong> ${feature.geometry.coordinates[1]}<br/>
-          <strong>Longitude:</strong> ${feature.geometry.coordinates[0]}
-        `;
-                layer.bindPopup(popupContent);
+            properties: {
+                confidence: row.confidence,
+                frp: row.frp,
+                acq_date: row.acq_date,
+                acq_time: row.acq_time,
+                satellite: row.satellite,
+                instrument: row.instrument
+                // Add other properties as needed
             }
-        }).addTo(map);
-    })
-    .catch(error => {
-        console.error('Error fetching wildfire data:', error);
-    });
+        }))
+    };
+    return geojsonData;
+}
+
+function updateFireData() {
+    fetch(FIRMS_API_URL)
+        .then(response => {
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+            return response.text(); // Get the response as text (CSV)
+        })
+        .then(csvData => {
+            const geojsonData = csvToGeoJSON(csvData); // Convert CSV to GeoJSON
+            fireLayer.clearLayers();
+            if (geojsonData && geojsonData.features) {
+                geojsonData.features.forEach(feature => {
+                    var coordinates = feature.geometry.coordinates;
+                    var lat = coordinates[1];
+                    var lng = coordinates[0];
+                    var confidence = feature.properties.confidence;
+                    var frp = feature.properties.frp;
+                    var acq_date = feature.properties.acq_date;
+                    var acq_time = feature.properties.acq_time;
+                    var satellite = feature.properties.satellite;
+                    var instrument = feature.properties.instrument;
+
+                    var markerColor = 'red';
+                    var radius = 5;
+
+                    if (confidence === 'h') {
+                        markerColor = 'red';
+                        radius = 7;
+                    } else if (confidence === 'm') {
+                        markerColor = 'orange';
+                        radius = 5;
+                    } else {
+                        markerColor = 'yellow';
+                        radius = 3;
+                    }
+
+                    var fireMarker = L.circleMarker([lat, lng], {
+                        radius: radius,
+                        fillColor: markerColor,
+                        color: '#333',
+                        weight: 1,
+                        opacity: 0.7
+                    });
+
+                    fireMarker.bindPopup(`<b>Confidence:</b> ${confidence}<br><b>FRP:</b> ${frp.toFixed(1)}<br><b>Acq. Date:</b> ${acq_date}<br><b>Acq. Time:</b> ${acq_time}<br><b>Satellite:</b> ${satellite}<br><b>Instrument:</b> ${instrument}`);
+                    fireLayer.addLayer(fireMarker);
+                });
+                console.log('Fire data updated');
+            } else {
+                console.warn('No fire data received or invalid format');
+            }
+        })
+        .catch(error => {
+            console.error('Error fetching or processing fire data:', error);
+        });
+}
+
+// Initial update and periodic updates
+updateFireData();
+setInterval(updateFireData, 300000);
