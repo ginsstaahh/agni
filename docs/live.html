@@ -25,11 +25,11 @@
     <script>
 
         // Map initialization
-        var map = L.map('map').setView([60, -95], 4);
+        const map = L.map('map').setView([60, -95], 4);
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
             attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
         }).addTo(map);
-        var fireLayer = L.layerGroup().addTo(map);
+        const fireLayer = L.layerGroup().addTo(map);
 
         // FIRMS API URL (CSV)
         const FIRMS_API_URL = 'https://firms.modaps.eosdis.nasa.gov/api/country/csv/1746807051add9a45676c1b1a45d7301/VIIRS_SNPP_NRT/CAN/1/';
@@ -50,18 +50,61 @@
                         type: "Point",
                         coordinates: [row.longitude, row.latitude]
                     },
-                    properties: {
-                        confidence: row.confidence,
-                        frp: row.frp,
-                        acq_date: row.acq_date,
-                        acq_time: row.acq_time,
-                        satellite: row.satellite,
-                        instrument: row.instrument
-                        // Add other properties as needed
-                    }
+                    properties: { ...row },
                 }))
             };
             return geojsonData;
+        }
+
+        const KM_PER_DEG_LAT = 110.574;
+        function kmToDegLat(km) { return km / KM_PER_DEG_LAT; }
+        function kmToDegLon(km, latDeg) {
+            const kmPerDegLon = 111.320 * Math.cos(latDeg * Math.PI / 180);
+            return km / kmPerDegLon;
+        }
+
+        function popupHTML(p) {
+            return `<b>Confidence:</b> ${p.confidence}<br>
+              <b>FRP:</b> ${(+p.frp).toFixed(1)}<br>
+              <b>Date:</b> ${p.acq_date}<br>
+              <b>Time:</b> ${p.acq_time}<br>
+              <b>Sat:</b> ${p.satellite}<br>
+              <b>Scan&nbsp;x&nbsp;Track:</b> ${p.scan || '–'} km × ${p.track || '–'} km`;
+        }
+
+        function addFireToMap(feature) {
+            const p = feature.properties;
+            const lat = feature.geometry.coordinates[1];
+            const lng = feature.geometry.coordinates[0];
+
+            // choose colour by confidence
+            let color = 'yellow';
+            if (p.confidence === 'h' || p.confidence > 80) color = 'red';
+            else if (p.confidence === 'm' || p.confidence > 40) color = 'orange';
+
+            // Convert scan/track; sometimes blank for older MODIS rows
+            if (p.scan && p.track) {
+                const halfLat = kmToDegLat(p.track / 2);
+                const halfLon = kmToDegLon(p.scan / 2, lat);
+                const rect = L.rectangle([[lat - halfLat, lng - halfLon], [lat + halfLat, lng + halfLon]], {
+                    color,
+                    weight: 1,
+                    fillOpacity: 0.5
+                });
+                rect.bindPopup(popupHTML(p));
+                fireLayer.addLayer(rect);
+            } else {
+                // fallback circle
+                const circ = L.circleMarker([lat, lng], {
+                    radius: 4,
+                    color: '#333',
+                    fillColor: color,
+                    fillOpacity: 0.7,
+                    weight: 1
+                });
+                circ.bindPopup(popupHTML(p));
+                fireLayer.addLayer(circ);
+            }
         }
 
         function updateFireData() {
@@ -74,43 +117,11 @@
                 })
                 .then(csvData => {
                     const geojsonData = csvToGeoJSON(csvData); // Convert CSV to GeoJSON
+                    console.log(geojsonData)
                     fireLayer.clearLayers();
                     if (geojsonData && geojsonData.features) {
                         geojsonData.features.forEach(feature => {
-                            var coordinates = feature.geometry.coordinates;
-                            var lat = coordinates[1];
-                            var lng = coordinates[0];
-                            var confidence = feature.properties.confidence;
-                            var frp = feature.properties.frp;
-                            var acq_date = feature.properties.acq_date;
-                            var acq_time = feature.properties.acq_time; // make it more human readable
-                            var satellite = feature.properties.satellite;
-                            var instrument = feature.properties.instrument;
-
-                            var markerColor = 'red';
-                            var radius = 5;
-
-                            if (confidence === 'h') {
-                                markerColor = 'red';
-                                radius = 7;
-                            } else if (confidence === 'm') {
-                                markerColor = 'orange';
-                                radius = 5;
-                            } else {
-                                markerColor = 'yellow';
-                                radius = 3;
-                            }
-
-                            var fireMarker = L.circleMarker([lat, lng], {
-                                radius: radius,
-                                fillColor: markerColor,
-                                color: '#333',
-                                weight: 1,
-                                opacity: 0.7
-                            });
-
-                            fireMarker.bindPopup(`<b>Confidence:</b> ${confidence}<br><b>FRP:</b> ${frp.toFixed(1)}<br><b>Acq. Date:</b> ${acq_date}<br><b>Acq. Time:</b> ${acq_time}<br><b>Satellite:</b> ${satellite}<br><b>Instrument:</b> ${instrument}`);
-                            fireLayer.addLayer(fireMarker);
+                            addFireToMap(feature); // Add each feature to the map
                         });
                         console.log('Fire data updated');
                     } else {
@@ -121,6 +132,25 @@
                     console.error('Error fetching or processing fire data:', error);
                 });
         }
+        // ---------- Legend control ----------
+        const legend = L.control({ position: 'bottomright' });
+
+        legend.onAdd = function (map) {
+            // container with three mini-swatches
+            const div = L.DomUtil.create('div', 'info legend');
+            div.innerHTML = `
+                <style>
+                .legend span { display:inline-block; width:12px; height:12px; margin-right:6px; border:1px solid #333; }
+                .legend { background:white; padding:6px 8px; font:12px/14px Arial, sans-serif; box-shadow:0 0 15px rgba(0,0,0,0.2); border-radius:5px; }
+                </style>
+                <div><span style="background:red"></span>High confidence (h / ≥80%)</div>
+                <div><span style="background:orange"></span>Medium confidence (m / 40-80%)</div>
+                <div><span style="background:yellow"></span>Low confidence (l / <40%)</div>
+            `;
+            return div;
+        };
+
+        legend.addTo(map);
 
         // Initial update and periodic updates
         updateFireData();
