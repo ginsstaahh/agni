@@ -1,14 +1,14 @@
 h1 {
     font-family: sans-serif;
     text-align: left;
-    margin: 0px 10px;
+    margin: 10px 10px;
 }
 
 p {
     color: grey;
     font-family: sans-serif;
     text-align: left;
-    margin: 0px 10px;
+    margin: 10px 10px;
 }
 
 iframe {
@@ -19,9 +19,9 @@ iframe {
 
 .container {
     text-align: center;
-    max-width: 1200px;
-    width: 100%;
-    margin: 0 auto;
+    width: 80%;
+    /* height: 90%; */
+    margin: 100px auto;
     background-color: white;
     /* box-shadow:0 1px 1px rgba(0,0,0,0.15),0 2px 2px rgba(0,0,0,0.15),0 4px 4px rgba(0,0,0,0.15),0 8px 8px rgba(0,0,0,0.15); */
 }
@@ -33,38 +33,5 @@ iframe {
 
 #background {
     background-color: grey;
-    /* margin: 0 0; */
+    /* margin: auto auto; */
 }
-
-.tab-buttons {
-    max-width: 200px;
-    margin-inline: auto;
-    display: flex;
-    cursor: pointer;
-    background-color: #333;
-    color: white;
-}
-
-.tab-buttons div {
-    flex: 1;
-    padding: 10px;
-    text-align: center;
-    background: #ddd;
-    transition: background-color 0.3s;
-}
-
-.tab-buttons .active {
-    background-color: #555;
-    color: white;
-}
-
-.tab-content {
-    display: none;
-    padding: 20px;
-}
-
-.tab-content.active {
-    display: block;
-}
-
-#map { height: 500px; }
