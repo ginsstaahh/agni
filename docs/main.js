@@ -25,10 +25,13 @@ function tabsClick(tabs, contents) {
 
 // Map initialization
 var map = L.map('map').setView([0, 0], 2);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+}).addTo(map);
 var fireLayer = L.layerGroup().addTo(map);
 
 // FIRMS API URL (CSV)
-const FIRMS_API_URL = 'https://firms.modaps.eosdis.nasa.gov/api/area/csv/1746807051add9a45676c1b1a45d7301/VIIRS_SNPP_NRT/-141,41,-52,83/1/';
+const FIRMS_API_URL = 'https://firms.modaps.eosdis.nasa.gov/api/country/csv/1746807051add9a45676c1b1a45d7301/VIIRS_SNPP_NRT/CAN/1/';
 
 function csvToGeoJSON(csvData) {
     // Use PapaParse to convert CSV to JSON
