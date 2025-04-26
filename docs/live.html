@@ -6,10 +6,11 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.7.1/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.7.1/dist/leaflet.js"></script>
+    <script src="https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
     <style>
         #map {
-            height: 500px;
+            height: 100%;
         }
 
         body {
@@ -25,11 +26,14 @@
     <script>
 
         // Map initialization
-        const map = L.map('map').setView([60, -95], 4);
+        const map = L.map('map').setView([55, -110], 5);
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
             attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
         }).addTo(map);
         const fireLayer = L.layerGroup().addTo(map);
+        const heatLayer = L.heatLayer([], { radius: 5, blur: 5, maxZoom: 8 });
+        const circleLayer = L.layerGroup();
+        const rectLayer = L.layerGroup();
 
         // FIRMS API URL (CSV)
         const FIRMS_API_URL = 'https://firms.modaps.eosdis.nasa.gov/api/country/csv/1746807051add9a45676c1b1a45d7301/VIIRS_SNPP_NRT/CAN/1/';
@@ -72,39 +76,37 @@
               <b>Scan&nbsp;x&nbsp;Track:</b> ${p.scan || '–'} km × ${p.track || '–'} km`;
         }
 
-        function addFireToMap(feature) {
-            const p = feature.properties;
-            const lat = feature.geometry.coordinates[1];
-            const lng = feature.geometry.coordinates[0];
+        function colour(conf) {
+            if (conf === 'h' || conf > 80) return 'red';
+            if (conf === 'm' || conf > 40) return 'orange';
+            return 'yellow';
+        }
 
-            // choose colour by confidence
-            let color = 'yellow';
-            if (p.confidence === 'h' || p.confidence > 80) color = 'red';
-            else if (p.confidence === 'm' || p.confidence > 40) color = 'orange';
+        function buildLayers(gj) {
+            heatLayer.setLatLngs([]);
+            circleLayer.clearLayers();
+            rectLayer.clearLayers();
 
-            // Convert scan/track; sometimes blank for older MODIS rows
-            if (p.scan && p.track) {
-                const halfLat = kmToDegLat(p.track / 2);
-                const halfLon = kmToDegLon(p.scan / 2, lat);
-                const rect = L.rectangle([[lat - halfLat, lng - halfLon], [lat + halfLat, lng + halfLon]], {
-                    color,
-                    weight: 1,
-                    fillOpacity: 0.5
-                });
-                rect.bindPopup(popupHTML(p));
-                fireLayer.addLayer(rect);
-            } else {
-                // fallback circle
-                const circ = L.circleMarker([lat, lng], {
-                    radius: 4,
-                    color: '#333',
-                    fillColor: color,
-                    fillOpacity: 0.7,
-                    weight: 1
-                });
+            gj.features.forEach(f => {
+                const p = f.properties, lat = f.geometry.coordinates[1], lng = f.geometry.coordinates[0];
+                const col = colour(p.confidence);
+
+                // ---- heat map point (intensity = FRP) ----
+                heatLayer.addLatLng([lat, lng, p.frp || 1]);
+
+                // ---- circle (mid‑zoom) ----
+                const circ = L.circleMarker([lat, lng], { radius: 4, fillColor: col, color: '#333', weight: 1, fillOpacity: 0.7 });
                 circ.bindPopup(popupHTML(p));
-                fireLayer.addLayer(circ);
-            }
+                circleLayer.addLayer(circ);
+
+                // ---- rectangle (detail view) ----
+                if (p.scan && p.track) {
+                    const hLat = kmToDegLat(p.track / 2), hLon = kmToDegLon(p.scan / 2, lat);
+                    const rect = L.rectangle([[lat - hLat, lng - hLon], [lat + hLat, lng + hLon]], { color: col, weight: 1, fillOpacity: 0.5 });
+                    rect.bindPopup(popupHTML(p));
+                    rectLayer.addLayer(rect);
+                }
+            });
         }
 
         function updateFireData() {
@@ -117,16 +119,8 @@
                 })
                 .then(csvData => {
                     const geojsonData = csvToGeoJSON(csvData); // Convert CSV to GeoJSON
-                    console.log(geojsonData)
-                    fireLayer.clearLayers();
-                    if (geojsonData && geojsonData.features) {
-                        geojsonData.features.forEach(feature => {
-                            addFireToMap(feature); // Add each feature to the map
-                        });
-                        console.log('Fire data updated');
-                    } else {
-                        console.warn('No fire data received or invalid format');
-                    }
+                    buildLayers(geojsonData); // Build layers from GeoJSON
+                    setVisibility();
                 })
                 .catch(error => {
                     console.error('Error fetching or processing fire data:', error);
@@ -151,6 +145,15 @@
         };
 
         legend.addTo(map);
+
+        function setVisibility() {
+            const z = map.getZoom();
+            map.removeLayer(heatLayer); map.removeLayer(circleLayer); map.removeLayer(rectLayer);
+            if (z <= 5) { map.addLayer(heatLayer); }
+            else if (z <= 8) { map.addLayer(circleLayer); }
+            else { map.addLayer(rectLayer); }
+        }
+        map.on('zoomend', setVisibility);
 
         // Initial update and periodic updates
         updateFireData();
