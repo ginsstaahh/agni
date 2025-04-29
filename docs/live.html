@@ -1,0 +1,164 @@
+<html>
+
+<head>
+    <title>Live Wildfire Map</title>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.7.1/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.7.1/dist/leaflet.js"></script>
+    <script src="https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+    <style>
+        #map {
+            height: 100%;
+        }
+
+        body {
+            margin: 0;
+            padding: 0;
+        }
+    </style>
+</head>
+
+<body>
+    <div id="map"></div>
+
+    <script>
+
+        // Map initialization
+        const map = L.map('map').setView([55, -110], 5);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+        }).addTo(map);
+        const fireLayer = L.layerGroup().addTo(map);
+        const heatLayer = L.heatLayer([], { radius: 5, blur: 5, maxZoom: 8 });
+        const circleLayer = L.layerGroup();
+        const rectLayer = L.layerGroup();
+
+        // FIRMS API URL (CSV)
+        const FIRMS_API_URL = 'https://firms.modaps.eosdis.nasa.gov/api/country/csv/1746807051add9a45676c1b1a45d7301/VIIRS_SNPP_NRT/CAN/1/';
+
+        function csvToGeoJSON(csvData) {
+            // Use PapaParse to convert CSV to JSON
+            const parsedData = Papa.parse(csvData, { header: true, dynamicTyping: true });
+            if (parsedData.errors.length > 0) {
+                console.error("Error parsing CSV:", parsedData.errors);
+                return { type: "FeatureCollection", features: [] }; // Return empty GeoJSON
+            }
+
+            const geojsonData = {
+                type: "FeatureCollection",
+                features: parsedData.data.map(row => ({
+                    type: "Feature",
+                    geometry: {
+                        type: "Point",
+                        coordinates: [row.longitude, row.latitude]
+                    },
+                    properties: { ...row },
+                }))
+            };
+            return geojsonData;
+        }
+
+        const KM_PER_DEG_LAT = 110.574;
+        function kmToDegLat(km) { return km / KM_PER_DEG_LAT; }
+        function kmToDegLon(km, latDeg) {
+            const kmPerDegLon = 111.320 * Math.cos(latDeg * Math.PI / 180);
+            return km / kmPerDegLon;
+        }
+
+        function popupHTML(p) {
+            return `<b>Confidence:</b> ${p.confidence}<br>
+              <b>FRP:</b> ${(+p.frp).toFixed(1)}<br>
+              <b>Date:</b> ${p.acq_date}<br>
+              <b>Time:</b> ${p.acq_time}<br>
+              <b>Sat:</b> ${p.satellite}<br>
+              <b>Scan&nbsp;x&nbsp;Track:</b> ${p.scan || '–'} km × ${p.track || '–'} km`;
+        }
+
+        function colour(conf) {
+            if (conf === 'h' || conf > 80) return 'red';
+            if (conf === 'm' || conf > 40) return 'orange';
+            return 'yellow';
+        }
+
+        function buildLayers(gj) {
+            heatLayer.setLatLngs([]);
+            circleLayer.clearLayers();
+            rectLayer.clearLayers();
+
+            gj.features.forEach(f => {
+                const p = f.properties, lat = f.geometry.coordinates[1], lng = f.geometry.coordinates[0];
+                const col = colour(p.confidence);
+
+                // ---- heat map point (intensity = FRP) ----
+                heatLayer.addLatLng([lat, lng, p.frp || 1]);
+
+                // ---- circle (mid‑zoom) ----
+                const circ = L.circleMarker([lat, lng], { radius: 4, fillColor: col, color: '#333', weight: 1, fillOpacity: 0.7 });
+                circ.bindPopup(popupHTML(p));
+                circleLayer.addLayer(circ);
+
+                // ---- rectangle (detail view) ----
+                if (p.scan && p.track) {
+                    const hLat = kmToDegLat(p.track / 2), hLon = kmToDegLon(p.scan / 2, lat);
+                    const rect = L.rectangle([[lat - hLat, lng - hLon], [lat + hLat, lng + hLon]], { color: col, weight: 1, fillOpacity: 0.5 });
+                    rect.bindPopup(popupHTML(p));
+                    rectLayer.addLayer(rect);
+                }
+            });
+        }
+
+        function updateFireData() {
+            fetch(FIRMS_API_URL)
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+                    return response.text(); // Get the response as text (CSV)
+                })
+                .then(csvData => {
+                    const geojsonData = csvToGeoJSON(csvData); // Convert CSV to GeoJSON
+                    buildLayers(geojsonData); // Build layers from GeoJSON
+                    setVisibility();
+                })
+                .catch(error => {
+                    console.error('Error fetching or processing fire data:', error);
+                });
+        }
+        // ---------- Legend control ----------
+        const legend = L.control({ position: 'bottomright' });
+
+        legend.onAdd = function (map) {
+            // container with three mini-swatches
+            const div = L.DomUtil.create('div', 'info legend');
+            div.innerHTML = `
+                <style>
+                .legend span { display:inline-block; width:12px; height:12px; margin-right:6px; border:1px solid #333; }
+                .legend { background:white; padding:6px 8px; font:12px/14px Arial, sans-serif; box-shadow:0 0 15px rgba(0,0,0,0.2); border-radius:5px; }
+                </style>
+                <div><span style="background:red"></span>High confidence (h / ≥80%)</div>
+                <div><span style="background:orange"></span>Medium confidence (m / 40-80%)</div>
+                <div><span style="background:yellow"></span>Low confidence (l / <40%)</div>
+            `;
+            return div;
+        };
+
+        legend.addTo(map);
+
+        function setVisibility() {
+            const z = map.getZoom();
+            map.removeLayer(heatLayer); map.removeLayer(circleLayer); map.removeLayer(rectLayer);
+            if (z <= 5) { map.addLayer(heatLayer); }
+            else if (z <= 8) { map.addLayer(circleLayer); }
+            else { map.addLayer(rectLayer); }
+        }
+        map.on('zoomend', setVisibility);
+
+        // Initial update and periodic updates
+        updateFireData();
+        setInterval(updateFireData, 300000);
+    </script>
+</body>
+
+</html>
